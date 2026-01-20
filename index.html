@@ -3,11 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v7.8</title>
+    <title>Peegel v7.9 - Helianduritega</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 15px; margin: 0; }
         .container { background: #1e293b; padding: 20px; border-radius: 25px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
         
+        /* Stats grid */
+        .stats { display: flex; gap: 10px; margin-bottom: 15px; }
+        .stat-card { flex: 1; background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
+        .stat-val { font-size: 1.2rem; font-weight: bold; color: #22c55e; }
+
         #live-transcript { min-height: 100px; background: #000; color: #fbbf24; padding: 15px; border-radius: 15px; border: 2px solid #3b82f6; margin-bottom: 20px; text-align: left; font-size: 1.1rem; }
         #timer { font-size: 3rem; font-weight: bold; margin: 10px 0; color: #fbbf24; }
         
@@ -18,20 +23,24 @@
 
         .history-item { background: #0f172a; padding: 15px; border-radius: 15px; margin-top: 20px; border: 1px solid #334155; text-align: left; position: relative; }
         .del-btn { background: #ef4444; color: white; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; float: right; font-weight: bold; }
-        .dl-link { color: #3b82f6; text-decoration: none; font-size: 0.9rem; font-weight: bold; display: block; margin-top: 10px; }
         audio { width: 100%; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div id="live-transcript">Vajuta ALUSTA ja räägi...</div>
+    <div class="stats">
+        <div class="stat-card"><div id="s-val" class="stat-val">0s</div><small>KÕNE</small></div>
+        <div class="stat-card"><div id="v-val" class="stat-val" style="color:#94a3b8">0s</div><small>VAIKUS</small></div>
+    </div>
+
+    <div id="live-transcript">Vajuta ALUSTA...</div>
     <div id="timer">00:00</div>
 
     <button id="startBtn" class="btn">🎤 ALUSTA SALVESTAMIST</button>
     
     <div id="activeControls" style="display:none;">
-        <button id="fixBtn" class="btn">📍 SALVESTA LÕIK</button>
+        <button id="fixBtn" class="btn">📍 SALVESTA LÕIK (FIKSEERI)</button>
         <button id="stopBtn" class="btn">⏹️ LÕPETA SESSIOON</button>
     </div>
 
@@ -39,64 +48,87 @@
 </div>
 
 <script>
-    let isLive = false, speechMs = 0, currentChunks = [];
-    let mediaRecorder, stream, recognition, db;
+    let isLive = false, speechMs = 0, silenceMs = 0;
+    let mediaRecorder, stream, recognition, db, audioContext, analyser, processor;
 
-    // Andmebaasi avamine
     const request = indexedDB.open("PeegelDatabase", 2);
-    request.onupgradeneeded = e => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains("archive")) {
-            db.createObjectStore("archive", { keyPath: "id" });
-        }
-    };
     request.onsuccess = e => { db = e.target.result; renderHistory(); };
-
-    function startSpeech() {
-        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRec) return;
-        recognition = new SpeechRec();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'et-EE';
-
-        recognition.onresult = (e) => {
-            let text = "";
-            for (let i = 0; i < e.results.length; i++) {
-                text += e.results[i][0].transcript;
-            }
-            document.getElementById('live-transcript').innerText = text;
-        };
-        recognition.onend = () => { if (isLive) recognition.start(); };
-        recognition.start();
-    }
 
     async function startEngine() {
         try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            startSpeech();
+            
+            // HELI ANALÜÜS (Kõne vs Vaikus)
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            const source = audioContext.createMediaStreamSource(stream);
+            processor = audioContext.createScriptProcessor(2048, 1, 1);
+            
+            source.connect(analyser);
+            analyser.connect(processor);
+            processor.connect(audioContext.destination);
+
+            processor.onaudioprocess = () => {
+                if (!isLive) return;
+                const array = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(array);
+                let avg = array.reduce((a, b) => a + b) / array.length;
+                
+                // Kui keskmine helitugevus on üle 10, loeme kõneks
+                if (avg > 10) { 
+                    speechMs += 50; 
+                } else { 
+                    silenceMs += 50; 
+                }
+                
+                document.getElementById('s-val').innerText = Math.round(speechMs/1000) + "s";
+                document.getElementById('v-val').innerText = Math.round(silenceMs/1000) + "s";
+            };
+
+            // TEKSTI TUVASTUS
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRec) {
+                recognition = new SpeechRec();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'et-EE';
+                recognition.onresult = (e) => {
+                    let text = "";
+                    for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+                    document.getElementById('live-transcript').innerText = text;
+                };
+                recognition.onend = () => { if (isLive) recognition.start(); };
+                recognition.start();
+            }
+
             createNewRecorder();
         } catch (e) { alert("Viga: " + e.message); }
     }
 
     function createNewRecorder() {
         if (!isLive) return;
-        currentChunks = [];
+        let chunks = [];
+        let startTime = new Date().toLocaleTimeString();
         mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = e => currentChunks.push(e.data);
-        mediaRecorder.onstop = async () => {
-            const blob = new Blob(currentChunks, { type: 'audio/webm' });
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'audio/webm' });
             const text = document.getElementById('live-transcript').innerText;
+            const sTime = document.getElementById('s-val').innerText;
+            const vTime = document.getElementById('v-val').innerText;
+            
             const tx = db.transaction("archive", "readwrite");
             tx.objectStore("archive").add({
                 id: Date.now(),
-                time: new Date().toLocaleTimeString(),
+                time: startTime + " - " + new Date().toLocaleTimeString(),
                 blob: blob,
-                text: text
+                text: text,
+                stats: `🎤 Kõne: ${sTime} | ☁️ Vaikus: ${vTime}`
             });
             tx.oncomplete = () => {
                 renderHistory();
                 if (isLive) {
+                    speechMs = 0; silenceMs = 0;
                     document.getElementById('live-transcript').innerText = "";
                     createNewRecorder();
                 }
@@ -112,8 +144,7 @@
         startEngine();
         setInterval(() => {
             if (isLive) {
-                speechMs += 1000;
-                let s = Math.floor(speechMs/1000);
+                let s = Math.floor((speechMs + silenceMs)/1000);
                 document.getElementById('timer').innerText = `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
             }
         }, 1000);
@@ -126,17 +157,14 @@
         const tx = db.transaction("archive", "readonly");
         tx.objectStore("archive").getAll().onsuccess = e => {
             const list = e.target.result.sort((a,b) => b.id - a.id);
-            document.getElementById('history-list').innerHTML = list.map(s => {
-                const url = URL.createObjectURL(s.blob);
-                return `
+            document.getElementById('history-list').innerHTML = list.map(s => `
                 <div class="history-item">
                     <button class="del-btn" onclick="deleteItem(${s.id})">KUSTUTA</button>
                     <div style="font-weight:bold; color:#fbbf24;">⏰ ${s.time}</div>
-                    <div style="margin:10px 0; font-size:1rem;">${s.text || "(Tekst puudub)"}</div>
-                    <audio controls src="${url}"></audio>
-                    <a href="${url}" download="salvestus.webm" class="dl-link">📥 Laadi alla arvutisse</a>
-                </div>`;
-            }).join('');
+                    <div style="font-size:0.75rem; color:#94a3b8; margin:5px 0;">${s.stats || ""}</div>
+                    <div style="margin:10px 0; font-size:1rem; border-left: 3px solid #3b82f6; padding-left:10px;">${s.text || "(Tekst puudub)"}</div>
+                    <audio controls src="${URL.createObjectURL(s.blob)}"></audio>
+                </div>`).join('');
         };
     }
 
