@@ -3,21 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v9.7</title>
+    <title>Peegel v9.9</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 10px; margin: 0; }
         .container { background: #1e293b; padding: 15px; border-radius: 20px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
-        #clock { font-size: 1.2rem; color: #94a3b8; margin-bottom: 5px; font-weight: bold; }
+        #clock { font-size: 1.5rem; color: #fbbf24; margin-bottom: 10px; font-weight: bold; }
         .stats { display: flex; gap: 8px; margin-bottom: 10px; }
         .stat-card { flex: 1; background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
-        #live-transcript { min-height: 100px; background: #000; color: #fbbf24; padding: 15px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 15px; text-align: left; }
-        .btn { display: block; width: 100%; padding: 20px; font-size: 1.2rem; border-radius: 15px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 10px; color: white; }
-        #startBtn { background: #22c55e; }
-        #fixBtn { background: #eab308; color: black; }
+        #live-transcript { min-height: 80px; background: #000; color: #fbbf24; padding: 15px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 15px; text-align: left; font-size: 1.1rem; }
+        .btn { display: block; width: 100%; padding: 20px; font-size: 1.3rem; border-radius: 15px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 10px; color: white; }
+        #startBtn { background: #22c55e; box-shadow: 0 4px 0 #166534; }
+        #fixBtn { background: #eab308; color: black; box-shadow: 0 4px 0 #a16207; }
         .history-item { background: #0f172a; padding: 15px; border-radius: 15px; margin-top: 15px; border: 1px solid #334155; text-align: left; }
-        .item-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .download-btn { background: #3b82f6; color: white; text-decoration: none; padding: 8px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: bold; }
-        .del-btn { background: #ef4444; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; }
+        .del-btn { background: #ef4444; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; float: right; }
         audio { width: 100%; margin-top: 10px; }
     </style>
 </head>
@@ -25,6 +23,7 @@
 
 <div class="container">
     <div id="clock">00:00:00</div>
+    
     <div class="stats">
         <div class="stat-card">🎤 Kõne: <span id="s-val" style="color:#22c55e">0s</span></div>
         <div class="stat-card">☁️ Vaikus: <span id="v-val" style="color:#94a3b8">0s</span></div>
@@ -36,21 +35,23 @@
     
     <div id="activeControls" style="display:none;">
         <button id="fixBtn" class="btn">📍 FIKSEERI LÕIK</button>
-        <button onclick="location.reload()" style="background:#ef4444; color:white; width:100%; padding:10px; border:none; border-radius:10px; cursor:pointer;">LÕPETA</button>
+        <button onclick="location.reload()" style="background:#ef4444; color:white; width:100%; padding:10px; border:none; border-radius:10px; cursor:pointer; font-weight:bold;">LÕPETA</button>
     </div>
 
     <div id="history-list"></div>
 </div>
 
 <script>
-    let isLive = false, speechMs = 0, silenceMs = 0, db, stream, mediaRecorder, recognition, currentFinalText = ""; 
-    let sessionStartTime = "", chunks = [];
-
+    // KELL
     setInterval(() => { document.getElementById('clock').innerText = new Date().toLocaleTimeString('et-EE'); }, 1000);
 
-    const request = indexedDB.open("PeegelV97", 1);
-    request.onupgradeneeded = e => e.target.result.createObjectStore("log", { keyPath: "id" });
-    request.onsuccess = e => { db = e.target.result; renderHistory(); };
+    let isLive = false, speechMs = 0, silenceMs = 0, db, stream, mediaRecorder, recognition;
+    let chunks = [], sessionStartTime = "";
+
+    // DB
+    const dbReq = indexedDB.open("PeegelV99", 1);
+    dbReq.onupgradeneeded = e => e.target.result.createObjectStore("log", { keyPath: "id" });
+    dbReq.onsuccess = e => { db = e.target.result; renderHistory(); };
 
     function initSpeech() {
         const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -62,7 +63,7 @@
         recognition.onresult = e => {
             let t = "";
             for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-            document.getElementById('live-transcript').innerText = t;
+            document.getElementById('live-transcript').innerText = t || "...";
         };
         recognition.onend = () => { if (isLive) recognition.start(); };
         recognition.start();
@@ -71,61 +72,66 @@
     async function startEngine() {
         try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
-            // Heli analüüs vaikuse jaoks
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const analyser = audioContext.createAnalyser();
-            const source = audioContext.createMediaStreamSource(stream);
             const processor = audioContext.createScriptProcessor(2048, 1, 1);
-            source.connect(analyser); analyser.connect(processor); processor.connect(audioContext.destination);
+            audioContext.createMediaStreamSource(stream).connect(analyser);
+            analyser.connect(processor);
+            processor.connect(audioContext.destination);
 
             processor.onaudioprocess = () => {
                 if (!isLive) return;
                 const data = new Uint8Array(analyser.frequencyBinCount);
                 analyser.getByteFrequencyData(data);
-                const volume = data.reduce((a,b)=>a+b)/data.length;
+                const volume = data.reduce((a,b) => a + b) / data.length;
                 if (volume > 11) speechMs += 50; else silenceMs += 50;
                 document.getElementById('s-val').innerText = Math.round(speechMs/1000) + "s";
                 document.getElementById('v-val').innerText = Math.round(silenceMs/1000) + "s";
             };
 
             initSpeech();
-            record();
+            startNewSession();
         } catch (err) { alert("Mikrofoni viga: " + err.message); }
     }
 
-    function record() {
+    function startNewSession() {
         if (!isLive) return;
         chunks = [];
+        speechMs = 0; silenceMs = 0;
         sessionStartTime = new Date().toLocaleTimeString('et-EE');
         mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = e => chunks.push(e.data);
-        mediaRecorder.onstop = () => {
-            const blob = new Blob(chunks, { type: 'audio/webm' });
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => {
-                const tx = db.transaction("log", "readwrite");
-                tx.objectStore("log").add({
-                    id: Date.now(),
-                    start: sessionStartTime,
-                    end: new Date().toLocaleTimeString('et-EE'),
-                    text: document.getElementById('live-transcript').innerText,
-                    audio: reader.result,
-                    speech: document.getElementById('s-val').innerText,
-                    silence: document.getElementById('v-val').innerText
-                });
-                tx.oncomplete = () => {
-                    renderHistory();
-                    if (isLive) {
-                        speechMs = 0; silenceMs = 0;
-                        document.getElementById('live-transcript').innerText = "...";
-                        record();
-                    }
-                };
+        mediaRecorder.ondataavailable = e => { if(e.data.size > 0) chunks.push(e.data); };
+        mediaRecorder.onstop = saveSession;
+        mediaRecorder.start();
+    }
+
+    function saveSession() {
+        // KONTROLL: Kui kõne on alla 0.3s ja teksti pole, siis ei salvesta
+        const transcript = document.getElementById('live-transcript').innerText;
+        if (speechMs < 300 && (transcript === "..." || transcript === "")) {
+            if (isLive) startNewSession();
+            return;
+        }
+
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = () => {
+            const tx = db.transaction("log", "readwrite");
+            tx.objectStore("log").add({
+                id: Date.now(),
+                start: sessionStartTime,
+                end: new Date().toLocaleTimeString('et-EE'),
+                text: transcript,
+                audio: reader.result,
+                stats: `🎤 ${Math.round(speechMs/1000)}s | ☁️ ${Math.round(silenceMs/1000)}s`
+            });
+            tx.oncomplete = () => {
+                renderHistory();
+                document.getElementById('live-transcript').innerText = "...";
+                if (isLive) startNewSession();
             };
         };
-        mediaRecorder.start();
     }
 
     document.getElementById('startBtn').onclick = () => {
@@ -147,12 +153,10 @@
             const items = e.target.result.sort((a,b) => b.id - a.id);
             document.getElementById('history-list').innerHTML = items.map(s => `
                 <div class="history-item">
-                    <div class="item-row">
-                        <span style="color:#fbbf24; font-weight:bold;">⏰ ${s.start} — ${s.end}</span>
-                        <button class="del-btn" onclick="del(${s.id})">🗑️</button>
-                    </div>
-                    <div style="font-size:0.75rem; color:#94a3b8;">🎤 Kõne: ${s.speech} | ☁️ Vaikus: ${s.silence}</div>
-                    <div style="margin:10px 0; border-left:3px solid #3b82f6; padding-left:10px;">${s.text}</div>
+                    <button class="del-btn" onclick="del(${s.id})">🗑️</button>
+                    <div style="color:#fbbf24; font-weight:bold;">⏰ ${s.start} — ${s.end}</div>
+                    <div style="font-size:0.75rem; color:#94a3b8; margin:5px 0;">${s.stats}</div>
+                    <div style="margin:10px 0; white-space:pre-wrap;">${s.text}</div>
                     <audio controls src="${s.audio}"></audio>
                 </div>`).join('');
         };
