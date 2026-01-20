@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v9.3 - Sujuv Heli</title>
+    <title>Peegel v9.4</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 10px; margin: 0; }
         .container { background: #1e293b; padding: 15px; border-radius: 25px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
@@ -12,7 +12,7 @@
         .stat-card { flex: 1; background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
         #live-transcript { min-height: 100px; background: #000; color: #fbbf24; padding: 15px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 15px; text-align: left; font-size: 1.1rem; }
         #rec-indicator { font-size: 0.8rem; font-weight: bold; margin-bottom: 5px; height: 20px; color: #94a3b8; }
-        .is-recording { color: #22c55e !important; } /* Roheline näitab nüüd sujuvat salvestust */
+        .is-recording { color: #22c55e !important; }
         #timer { font-size: 2.5rem; font-weight: bold; margin: 5px 0; color: #fbbf24; }
         .btn { display: block; width: 100%; padding: 20px; font-size: 1.2rem; border-radius: 15px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 10px; color: white; }
         #startBtn { background: #22c55e; box-shadow: 0 4px 0 #166534; }
@@ -24,6 +24,7 @@
         .hidden-text { display: none; margin-top: 10px; padding: 10px; background: #1e293b; border-radius: 10px; border-left: 3px solid #3b82f6; white-space: pre-wrap; }
         .del-btn { background: #ef4444; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; }
         audio { width: 100%; margin-top: 10px; }
+        .silence-tag { color: #94a3b8; font-size: 0.85rem; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -55,7 +56,7 @@
 
     setInterval(() => { document.getElementById('clock').innerText = new Date().toLocaleTimeString('et-EE'); }, 1000);
 
-    const request = indexedDB.open("PeegelV93", 1);
+    const request = indexedDB.open("PeegelV94", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("log", { keyPath: "id" });
     request.onsuccess = e => { db = e.target.result; renderHistory(); };
 
@@ -87,7 +88,6 @@
             ctx.createMediaStreamSource(stream).connect(analyser);
             analyser.connect(processor); processor.connect(ctx.destination);
             
-            // Konfigureerime MediaRecorderi (tükid on nüüd tihedamad paremaks kontrolliks)
             mediaRecorder = new MediaRecorder(stream);
             mediaRecorder.ondataavailable = e => { if(e.data.size > 0) chunks.push(e.data); };
 
@@ -97,30 +97,25 @@
                 analyser.getByteFrequencyData(data);
                 const volume = data.reduce((a,b)=>a+b)/data.length;
 
-                // TUGEVUSE KÜNNIS
                 if (volume > 11) { 
                     speechMs += 50;
                     document.getElementById('rec-indicator').innerText = "● HELI TUVASTATUD";
                     document.getElementById('rec-indicator').classList.add("is-recording");
                     
-                    if (mediaRecorder.state === "inactive") {
-                        mediaRecorder.start(100); 
-                    } else if (mediaRecorder.state === "paused") {
-                        mediaRecorder.resume();
-                    }
+                    if (mediaRecorder.state === "inactive") mediaRecorder.start(100); 
+                    else if (mediaRecorder.state === "paused") mediaRecorder.resume();
                     
-                    // Kui hakkasime rääkima, tühistame vaikuse "sulgemise" taimeri
                     if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
                 } else {
                     silenceMs += 50;
-                    // Kui tekib vaikus, ootame 400ms (puhver) enne kui päriselt pausi paneme
                     if (mediaRecorder.state === "recording" && !silenceTimer) {
+                        // 0.06s padding (60ms) soovitud lõikamiseks
                         silenceTimer = setTimeout(() => {
                             if (mediaRecorder.state === "recording") mediaRecorder.pause();
-                            document.getElementById('rec-indicator').innerText = "○ VAIKUS (PUHVERDATUD)";
+                            document.getElementById('rec-indicator').innerText = "○ VAIKUS (LÕIGATUD)";
                             document.getElementById('rec-indicator').classList.remove("is-recording");
                             silenceTimer = null;
-                        }, 400); // See on see "pärast vaikust" puhver
+                        }, 60); 
                     }
                 }
                 document.getElementById('s-val').innerText = Math.round(speechMs/1000) + "s";
@@ -144,9 +139,10 @@
     document.getElementById('fixBtn').onclick = () => {
         const endTime = new Date().toLocaleTimeString('et-EE');
         const textToSave = document.getElementById('live-transcript').innerText.trim();
-        const currentSpeech = speechMs;
+        const speechNow = speechMs;
+        const silenceNow = silenceMs;
 
-        if (currentSpeech < 500 && (textToSave === "..." || textToSave === "")) {
+        if (speechNow < 500 && (textToSave === "..." || textToSave === "")) {
             resetSess(); return;
         }
 
@@ -160,7 +156,9 @@
                     const tx = db.transaction("log", "readwrite");
                     tx.objectStore("log").add({
                         id: Date.now(), start: sessionStartTime, end: endTime,
-                        text: textToSave, audio: reader.result, stats: `Kõne: ${Math.round(currentSpeech/1000)}s | Vaikus lõigatud`
+                        text: textToSave, audio: reader.result, 
+                        speech: Math.round(speechNow/1000), 
+                        silence: Math.round(silenceNow/1000)
                     });
                     tx.oncomplete = () => { renderHistory(); resetSess(); };
                 };
@@ -185,8 +183,11 @@
                         <span style="color:#fbbf24; font-weight:bold;">⏰ ${s.start} — ${s.end}</span>
                         <button class="del-btn" onclick="del(${s.id})">🗑️</button>
                     </div>
-                    <div style="font-size:0.7rem; color:#94a3b8; margin-bottom:10px;">${s.stats}</div>
                     <div class="item-row">
+                        <span style="color:#22c55e; font-size:0.85rem;">🎤 Kõne: ${s.speech}s</span>
+                        <span class="silence-tag">☁️ Vaikuse kestvus: ${s.silence}s</span>
+                    </div>
+                    <div class="item-row" style="margin-top:10px;">
                         <button class="download-btn" onclick="fullDownload(${s.id})">📥 SALVESTA FAILINA</button>
                         <button class="text-toggle-btn" onclick="toggleText(${s.id})">📄 VAATA TEKSTI</button>
                     </div>
@@ -200,7 +201,15 @@
         const tx = db.transaction("log", "readonly");
         tx.objectStore("log").get(id).onsuccess = e => {
             const d = e.target.result;
-            const html = `<html><body style="font-family:sans-serif;padding:20px;"><h2>Sessioon: ${d.start} - ${d.end}</h2><audio controls src="${d.audio}" style="width:100%"></audio><p style="white-space:pre-wrap;">${d.text}</p></body></html>`;
+            const html = `<html><body style="font-family:sans-serif;padding:20px;background:#f8fafc;">
+                <div style="max-width:600px;margin:0 auto;background:white;padding:20px;border-radius:15px;box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+                    <h2>Sessiooni raport: ${d.start} - ${d.end}</h2>
+                    <p><b>Heli sisu:</b> ${d.speech}s | <b>Eemaldatud vaikus:</b> ${d.silence}s</p>
+                    <audio controls src="${d.audio}" style="width:100%"></audio>
+                    <hr>
+                    <div style="white-space:pre-wrap;margin-top:20px;">${d.text}</div>
+                </div>
+            </body></html>`;
             const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], {type: 'text/html'}));
             a.download = `Sessioon_${d.start.replace(/:/g,'-')}.html`; a.click();
         };
