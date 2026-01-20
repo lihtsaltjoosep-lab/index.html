@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v9.4</title>
+    <title>Peegel v9.5</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 10px; margin: 0; }
         .container { background: #1e293b; padding: 15px; border-radius: 25px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
@@ -40,7 +40,7 @@
     <div id="live-transcript">Vajuta ALUSTA...</div>
     <div id="timer">00:00</div>
 
-    <button id="startBtn" class="btn">🎤 ALUSTA</button>
+    <button id="startBtn" class="btn">🎤 ALUSTA SESSIOONI</button>
     
     <div id="activeControls" style="display:none;">
         <button id="fixBtn" class="btn">📍 FIKSEERI LÕIK</button>
@@ -56,7 +56,7 @@
 
     setInterval(() => { document.getElementById('clock').innerText = new Date().toLocaleTimeString('et-EE'); }, 1000);
 
-    const request = indexedDB.open("PeegelV94", 1);
+    const request = indexedDB.open("PeegelV95", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("log", { keyPath: "id" });
     request.onsuccess = e => { db = e.target.result; renderHistory(); };
 
@@ -99,123 +99,9 @@
 
                 if (volume > 11) { 
                     speechMs += 50;
-                    document.getElementById('rec-indicator').innerText = "● HELI TUVASTATUD";
+                    document.getElementById('rec-indicator').innerText = "● HELI TUVASTATUD (+0.14s algus)";
                     document.getElementById('rec-indicator').classList.add("is-recording");
                     
-                    if (mediaRecorder.state === "inactive") mediaRecorder.start(100); 
-                    else if (mediaRecorder.state === "paused") mediaRecorder.resume();
-                    
-                    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-                } else {
-                    silenceMs += 50;
-                    if (mediaRecorder.state === "recording" && !silenceTimer) {
-                        // 0.06s padding (60ms) soovitud lõikamiseks
-                        silenceTimer = setTimeout(() => {
-                            if (mediaRecorder.state === "recording") mediaRecorder.pause();
-                            document.getElementById('rec-indicator').innerText = "○ VAIKUS (LÕIGATUD)";
-                            document.getElementById('rec-indicator').classList.remove("is-recording");
-                            silenceTimer = null;
-                        }, 60); 
-                    }
-                }
-                document.getElementById('s-val').innerText = Math.round(speechMs/1000) + "s";
-                document.getElementById('v-val').innerText = Math.round(silenceMs/1000) + "s";
-            };
-            initSpeech();
-            sessionStartTime = new Date().toLocaleTimeString('et-EE');
-        } catch (err) { alert(err.message); }
-    }
-
-    document.getElementById('startBtn').onclick = () => {
-        isLive = true; document.getElementById('startBtn').style.display = 'none';
-        document.getElementById('activeControls').style.display = 'block';
-        startEngine();
-        setInterval(() => { if (isLive) { 
-            let s = Math.floor((speechMs + silenceMs)/1000); 
-            document.getElementById('timer').innerText = `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`; 
-        } }, 1000);
-    };
-
-    document.getElementById('fixBtn').onclick = () => {
-        const endTime = new Date().toLocaleTimeString('et-EE');
-        const textToSave = document.getElementById('live-transcript').innerText.trim();
-        const speechNow = speechMs;
-        const silenceNow = silenceMs;
-
-        if (speechNow < 500 && (textToSave === "..." || textToSave === "")) {
-            resetSess(); return;
-        }
-
-        if (mediaRecorder.state !== "inactive") {
-            mediaRecorder.stop();
-            setTimeout(() => {
-                const blob = new Blob(chunks, { type: 'audio/webm' });
-                const reader = new FileReader();
-                reader.readAsDataURL(blob);
-                reader.onloadend = () => {
-                    const tx = db.transaction("log", "readwrite");
-                    tx.objectStore("log").add({
-                        id: Date.now(), start: sessionStartTime, end: endTime,
-                        text: textToSave, audio: reader.result, 
-                        speech: Math.round(speechNow/1000), 
-                        silence: Math.round(silenceNow/1000)
-                    });
-                    tx.oncomplete = () => { renderHistory(); resetSess(); };
-                };
-            }, 600);
-        }
-    };
-
-    function resetSess() {
-        currentFinalText = ""; speechMs = 0; silenceMs = 0; chunks = [];
-        sessionStartTime = new Date().toLocaleTimeString('et-EE');
-        document.getElementById('live-transcript').innerText = "...";
-        if (isLive && mediaRecorder.state === "inactive") mediaRecorder.start(100);
-    }
-
-    function renderHistory() {
-        const tx = db.transaction("log", "readonly");
-        tx.objectStore("log").getAll().onsuccess = e => {
-            const items = e.target.result.sort((a,b) => b.id - a.id);
-            document.getElementById('history-list').innerHTML = items.map(s => `
-                <div class="history-item">
-                    <div class="item-row">
-                        <span style="color:#fbbf24; font-weight:bold;">⏰ ${s.start} — ${s.end}</span>
-                        <button class="del-btn" onclick="del(${s.id})">🗑️</button>
-                    </div>
-                    <div class="item-row">
-                        <span style="color:#22c55e; font-size:0.85rem;">🎤 Kõne: ${s.speech}s</span>
-                        <span class="silence-tag">☁️ Vaikuse kestvus: ${s.silence}s</span>
-                    </div>
-                    <div class="item-row" style="margin-top:10px;">
-                        <button class="download-btn" onclick="fullDownload(${s.id})">📥 SALVESTA FAILINA</button>
-                        <button class="text-toggle-btn" onclick="toggleText(${s.id})">📄 VAATA TEKSTI</button>
-                    </div>
-                    <div id="text-${s.id}" class="hidden-text">${s.text}</div>
-                    <audio controls src="${s.audio}"></audio>
-                </div>`).join('');
-        };
-    }
-
-    window.fullDownload = (id) => {
-        const tx = db.transaction("log", "readonly");
-        tx.objectStore("log").get(id).onsuccess = e => {
-            const d = e.target.result;
-            const html = `<html><body style="font-family:sans-serif;padding:20px;background:#f8fafc;">
-                <div style="max-width:600px;margin:0 auto;background:white;padding:20px;border-radius:15px;box-shadow:0 2px 10px rgba(0,0,0,0.1);">
-                    <h2>Sessiooni raport: ${d.start} - ${d.end}</h2>
-                    <p><b>Heli sisu:</b> ${d.speech}s | <b>Eemaldatud vaikus:</b> ${d.silence}s</p>
-                    <audio controls src="${d.audio}" style="width:100%"></audio>
-                    <hr>
-                    <div style="white-space:pre-wrap;margin-top:20px;">${d.text}</div>
-                </div>
-            </body></html>`;
-            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], {type: 'text/html'}));
-            a.download = `Sessioon_${d.start.replace(/:/g,'-')}.html`; a.click();
-        };
-    };
-    window.toggleText = (id) => { const el = document.getElementById(`text-${id}`); el.style.display = (el.style.display === "block") ? "none" : "block"; };
-    window.del = id => { if(confirm("Kustuta?")) { const tx = db.transaction("log", "readwrite"); tx.objectStore("log").delete(id); tx.oncomplete = renderHistory; } };
-</script>
-</body>
-</html>
+                    if (mediaRecorder.state === "inactive") {
+                        // Alustame kohe, MediaRecorder ise ei toeta tagasiulatuvat, 
+                        //
