@@ -3,75 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v8.7</title>
+    <title>Peegel v8.8</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 10px; margin: 0; }
         .container { background: #1e293b; padding: 15px; border-radius: 25px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
-        #clock { font-size: 1.2rem; color: #94a3b8; margin-bottom: 10px; font-weight: bold; }
+        #clock { font-size: 1.2rem; color: #94a3b8; margin-bottom: 5px; font-weight: bold; }
+        
+        /* Staatuse märgutuli */
+        #speech-status { font-size: 0.75rem; margin-bottom: 10px; font-weight: bold; padding: 4px; border-radius: 5px; }
+        .status-ok { color: #22c55e; background: rgba(34, 197, 94, 0.1); }
+        .status-err { color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+
         .stats { display: flex; gap: 8px; margin-bottom: 10px; }
         .stat-card { flex: 1; background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
-        #live-transcript { min-height: 100px; background: #000; color: #fbbf24; padding: 15px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 15px; text-align: left; font-size: 1.1rem; }
+        
+        #live-transcript { min-height: 100px; background: #000; color: #fbbf24; padding: 15px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 15px; text-align: left; font-size: 1.1rem; cursor: pointer; }
+        
         #timer { font-size: 2.5rem; font-weight: bold; margin: 5px 0; color: #fbbf24; }
         .btn { display: block; width: 100%; padding: 20px; font-size: 1.2rem; border-radius: 15px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 10px; color: white; }
         #startBtn { background: #22c55e; box-shadow: 0 4px 0 #166534; }
         #fixBtn { background: #eab308; color: black; box-shadow: 0 4px 0 #a16207; }
+        
         .history-item { background: #0f172a; padding: 15px; border-radius: 15px; margin-top: 15px; border: 1px solid #334155; text-align: left; }
         .item-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 5px; }
         .download-btn { background: #3b82f6; color: white; text-decoration: none; padding: 8px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: bold; flex: 1; text-align: center; }
         .text-toggle-btn { background: #475569; color: white; border: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; flex: 1; }
         .hidden-text { display: none; margin-top: 10px; padding: 10px; background: #1e293b; border-radius: 10px; border-left: 3px solid #3b82f6; font-size: 0.95rem; }
-        .del-btn { background: #ef4444; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; }
+        .del-btn { background: #ef4444; color: white; border: none; padding: 8px; border-radius: 8px; }
         audio { width: 100%; margin-top: 10px; }
-        .status-msg { font-size: 0.8rem; color: #eab308; margin-bottom: 5px; display: none; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div id="clock">00:00:00</div>
+    <div id="speech-status" class="status-err">⚪ TEKST ON VÄLJAS</div>
+    
     <div class="stats">
         <div class="stat-card">🎤 Kõne: <span id="s-val" style="color:#22c55e">0s</span></div>
         <div class="stat-card">☁️ Vaikus: <span id="v-val" style="color:#94a3b8">0s</span></div>
     </div>
-    <div id="status-msg" class="status-msg">Ootan lause lõppu...</div>
-    <div id="live-transcript">Alusta sessiooni...</div>
+
+    <div id="live-transcript" onclick="manualRestart()">Vajuta ALUSTA...</div>
     <div id="timer">00:00</div>
+
     <button id="startBtn" class="btn">🎤 ALUSTA</button>
+    
     <div id="activeControls" style="display:none;">
         <button id="fixBtn" class="btn">📍 FIKSEERI LÕIK</button>
         <button onclick="location.reload()" style="background:#ef4444; color:white; width:100%; padding:10px; border-radius:10px; border:none; font-weight:bold;">LÕPETA</button>
     </div>
+
     <div id="history-list"></div>
 </div>
 
 <script>
-    let isLive = false, speechMs = 0, silenceMs = 0, db, stream, mediaRecorder, recognition;
-    let currentFinalText = ""; 
+    let isLive = false, speechMs = 0, silenceMs = 0, db, stream, mediaRecorder, recognition, currentFinalText = ""; 
 
     setInterval(() => { document.getElementById('clock').innerText = new Date().toLocaleTimeString('et-EE'); }, 1000);
 
-    const request = indexedDB.open("PeegelV87", 1);
+    const request = indexedDB.open("PeegelV88", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("log", { keyPath: "id" });
     request.onsuccess = e => { db = e.target.result; renderHistory(); };
 
+    function setStatus(ok, msg) {
+        const el = document.getElementById('speech-status');
+        el.innerText = msg;
+        el.className = ok ? 'status-ok' : 'status-err';
+    }
+
     function initSpeech() {
         const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!Rec) return;
+        if (!Rec) { setStatus(false, "VIGA: BRAUSER EI TOETA TEKSTI"); return; }
+        
         recognition = new Rec();
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = 'et-EE';
+
+        recognition.onstart = () => { setStatus(true, "🟢 TEKST ON AKTIIVNE"); };
+        recognition.onerror = (e) => { setStatus(false, "🔴 TEKSTIPEATUS: " + e.error); };
+        
         recognition.onresult = e => {
             let interim = "";
             for (let i = e.resultIndex; i < e.results.length; i++) {
                 if (e.results[i].isFinal) currentFinalText += e.results[i][0].transcript + " ";
                 else interim = e.results[i][0].transcript;
             }
-            document.getElementById('live-transcript').innerText = currentFinalText + interim;
+            document.getElementById('live-transcript').innerText = (currentFinalText + interim) || "Kuulan...";
         };
-        recognition.onend = () => { if (isLive) recognition.start(); };
+
+        recognition.onend = () => { 
+            if (isLive) {
+                setStatus(false, "🟡 TAASTAMINE...");
+                setTimeout(() => recognition.start(), 300); 
+            }
+        };
         recognition.start();
     }
+
+    window.manualRestart = () => {
+        if (isLive && recognition) {
+            try { recognition.stop(); } catch(e) {}
+            setStatus(false, "KÄSITSI TAASTAMINE...");
+        }
+    };
 
     async function startEngine() {
         try {
@@ -91,7 +127,7 @@
             };
             initSpeech();
             record();
-        } catch (err) { alert(err.message); }
+        } catch (err) { alert("Mikrofoni viga: " + err.message); }
     }
 
     function record() {
@@ -104,23 +140,18 @@
             const statsSnapshot = `Kõne: ${document.getElementById('s-val').innerText}, Vaikus: ${document.getElementById('v-val').innerText}`;
             const blob = new Blob(chunks, { type: 'audio/webm' });
             
-            // Konverdime blobi Base64-ks, et see faili sisse panna
             const reader = new FileReader();
             reader.readAsDataURL(blob);
             reader.onloadend = () => {
-                const base64Audio = reader.result;
                 const tx = db.transaction("log", "readwrite");
                 tx.objectStore("log").add({
-                    id: Date.now(),
-                    text: finalSnapshot,
-                    audio: base64Audio,
-                    stats: statsSnapshot
+                    id: Date.now(), text: finalSnapshot, audio: reader.result, stats: statsSnapshot
                 });
                 tx.oncomplete = () => {
                     renderHistory();
                     if (isLive) {
                         currentFinalText = ""; speechMs = 0; silenceMs = 0;
-                        document.getElementById('live-transcript').innerText = "...";
+                        document.getElementById('live-transcript').innerText = "Ootan...";
                         record();
                     }
                 };
@@ -137,14 +168,11 @@
     };
 
     document.getElementById('fixBtn').onclick = () => {
-        document.getElementById('status-msg').style.display = "block";
-        // Ootame 1.2 sekundit, et hääletuvastus jõuaks "interim" teksti "final"-iks teha
         setTimeout(() => {
             if (mediaRecorder.state === "recording") {
                 mediaRecorder.stop();
-                if (recognition) recognition.stop();
+                if (recognition) try { recognition.stop(); } catch(e) {}
             }
-            document.getElementById('status-msg').style.display = "none";
         }, 1200);
     };
 
@@ -174,26 +202,14 @@
     window.downloadAll = (id) => {
         const tx = db.transaction("log", "readonly");
         tx.objectStore("log").get(id).onsuccess = e => {
-            const data = e.target.result;
-            const htmlContent = `
-                <html><body style="font-family:sans-serif; padding:20px; background:#f0f2f5;">
-                <h2>Salvestus: ${new Date(id).toLocaleString()}</h2>
-                <p><b>Statistika:</b> ${data.stats}</p>
-                <audio controls src="${data.audio}" style="width:100%"></audio>
-                <div style="margin-top:20px; padding:20px; background:white; border-radius:10px;">${data.text}</div>
-                </body></html>`;
-            const blob = new Blob([htmlContent], {type: 'text/html'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `Sessioon_${id}.html`; a.click();
+            const d = e.target.result;
+            const html = `<html><body style="font-family:sans-serif;padding:20px;"><h2>${new Date(id).toLocaleString()}</h2><audio controls src="${d.audio}" style="width:100%"></audio><p>${d.text}</p></body></html>`;
+            const blob = new Blob([html], {type: 'text/html'});
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `Sessioon_${id}.html`; a.click();
         };
     };
-
-    window.toggleText = (id) => {
-        const el = document.getElementById(`text-${id}`);
-        el.style.display = (el.style.display === "block") ? "none" : "block";
-    };
-
-    window.del = id => { if(confirm("Kustutada?")) { const tx = db.transaction("log", "readwrite"); tx.objectStore("log").delete(id); tx.oncomplete = renderHistory; } };
+    window.toggleText = (id) => { const el = document.getElementById(`text-${id}`); el.style.display = (el.style.display === "block") ? "none" : "block"; };
+    window.del = id => { if(confirm("Kustuta?")) { const tx = db.transaction("log", "readwrite"); tx.objectStore("log").delete(id); tx.oncomplete = renderHistory; } };
 </script>
 </body>
 </html>
