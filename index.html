@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v8.4 - Puhas Tekst</title>
+    <title>Peegel v8.5 - Sünkroonis</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 15px; margin: 0; }
         .container { background: #1e293b; padding: 20px; border-radius: 25px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
         .stats { display: flex; gap: 10px; margin-bottom: 15px; }
         .stat-card { flex: 1; background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
-        #live-transcript { min-height: 80px; background: #000; color: #fbbf24; padding: 15px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 20px; text-align: left; font-size: 1rem; }
+        #live-transcript { min-height: 100px; background: #000; color: #fbbf24; padding: 15px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 20px; text-align: left; font-size: 1.1rem; line-height: 1.4; }
         .btn { display: block; width: 100%; padding: 22px; font-size: 1.3rem; border-radius: 20px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 15px; color: white; }
         #startBtn { background: #22c55e; box-shadow: 0 6px 0 #166534; }
         #fixBtn { background: #eab308; color: black; box-shadow: 0 6px 0 #a16207; }
@@ -36,9 +36,9 @@
 
 <script>
     let isLive = false, speechMs = 0, silenceMs = 0, db, stream, mediaRecorder, recognition;
-    let finalTranscript = ""; // Muutuja praeguse lõigu teksti hoidmiseks
+    let fullTranscript = ""; 
 
-    const request = indexedDB.open("PeegelV84", 1);
+    const request = indexedDB.open("PeegelV85", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("log", { keyPath: "id" });
     request.onsuccess = e => { db = e.target.result; renderHistory(); };
 
@@ -57,9 +57,8 @@
                 if (e.results[i].isFinal) currentFinal += e.results[i][0].transcript;
                 else interim += e.results[i][0].transcript;
             }
-            // Lisame uue lõpliku teksti olemasolevale
-            if (currentFinal) finalTranscript += currentFinal + " ";
-            document.getElementById('live-transcript').innerText = finalTranscript + interim;
+            if (currentFinal) fullTranscript += currentFinal + " ";
+            document.getElementById('live-transcript').innerText = fullTranscript + interim;
         };
 
         recognition.onend = () => { if (isLive) recognition.start(); };
@@ -69,8 +68,6 @@
     async function startEngine() {
         try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
-            // Heli analüüs
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             const analyser = ctx.createAnalyser();
             const processor = ctx.createScriptProcessor(2048, 1, 1);
@@ -84,7 +81,6 @@
                 document.getElementById('s-val').innerText = Math.round(speechMs/1000) + "s";
                 document.getElementById('v-val').innerText = Math.round(silenceMs/1000) + "s";
             };
-
             initSpeech();
             record();
         } catch (err) { alert(err.message); }
@@ -96,27 +92,24 @@
         mediaRecorder = new MediaRecorder(stream);
         mediaRecorder.ondataavailable = e => chunks.push(e.data);
         mediaRecorder.onstop = () => {
-            const currentText = finalTranscript; // Võtame salvestatud teksti
+            // Võtame kogu teksti, mis ekraanil on
+            const textToSave = document.getElementById('live-transcript').innerText;
             const blob = new Blob(chunks, { type: 'audio/webm' });
             
             const tx = db.transaction("log", "readwrite");
             tx.objectStore("log").add({
                 id: Date.now(),
-                text: currentText.trim() || "(Tekst puudub)",
+                text: textToSave.trim() || "(Vaikus)",
                 blob: blob,
                 stats: `🎤 ${document.getElementById('s-val').innerText} | ☁️ ${document.getElementById('v-val').innerText}`
             });
             tx.oncomplete = () => {
                 renderHistory();
                 if (isLive) {
-                    // KRIIITILINE: Nullime teksti ja loendurid uue lõigu jaoks
-                    finalTranscript = ""; 
+                    fullTranscript = ""; // Nullime mälu
                     speechMs = 0; 
                     silenceMs = 0; 
                     document.getElementById('live-transcript').innerText = "...";
-                    
-                    // Restartime hääletuvastuse, et puhver tühjeneks
-                    recognition.stop(); 
                     record();
                 }
             };
@@ -130,7 +123,17 @@
         startEngine();
     };
 
-    document.getElementById('fixBtn').onclick = () => { if (mediaRecorder.state === "recording") mediaRecorder.stop(); };
+    document.getElementById('fixBtn').onclick = () => {
+        if (mediaRecorder.state === "recording") {
+            // Ootame 600ms, et viimased sõnad jõuaksid "final" staatusesse
+            setTimeout(() => {
+                mediaRecorder.stop();
+                if (recognition) {
+                    recognition.stop(); // Restartime, et puhver tühjeneks
+                }
+            }, 600);
+        }
+    };
 
     function renderHistory() {
         const tx = db.transaction("log", "readonly");
@@ -141,7 +144,7 @@
                 return `
                 <div class="history-item">
                     <button class="del-btn" onclick="del(${s.id})">🗑️</button>
-                    <a href="${url}" download="Peegel_${s.id}.webm" class="download-btn">📥 LAADI ALLA (.webm)</a>
+                    <a href="${url}" download="Salvestus_${s.id}.webm" class="download-btn">📥 LAADI ALLA</a>
                     <div style="font-size:0.8rem; color:#fbbf24; font-weight:bold;">${new Date(s.id).toLocaleTimeString()}</div>
                     <div style="font-size:0.75rem; color:#94a3b8; margin:5px 0;">${s.stats}</div>
                     <div style="margin:10px 0; border-left: 3px solid #3b82f6; padding-left:10px;">${s.text}</div>
