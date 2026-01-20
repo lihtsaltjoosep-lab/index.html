@@ -3,52 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v7.3</title>
-    <link rel="manifest" href="manifest.json">
+    <title>Peegel v7.4</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 15px; margin: 0; }
         .container { background: #1e293b; padding: 20px; border-radius: 25px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
-        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-        .stat-card { background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
+        
+        /* Stats grid */
+        .stats { display: flex; gap: 10px; margin-bottom: 15px; }
+        .stat-card { flex: 1; background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
         .stat-val { font-size: 1.2rem; font-weight: bold; color: #22c55e; }
-        #live-transcript { height: 100px; background: #000; color: #fbbf24; padding: 12px; border-radius: 12px; overflow-y: auto; border: 1px solid #334155; margin-bottom: 15px; text-align: left; font-size: 0.9rem; }
-        #timer { font-size: 2.5rem; font-weight: bold; margin: 10px 0; color: #fbbf24; font-variant-numeric: tabular-nums; }
-        button { padding: 18px; font-size: 1.1rem; border-radius: 15px; border: none; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 10px; }
-        .start-btn { background: #22c55e; color: white; }
-        .fix-btn { background: #eab308; color: black; box-shadow: 0 4px 0 #a16207; }
-        .stop-btn { background: #ef4444; color: white; font-size: 0.9rem; padding: 10px; margin-top: 10px; }
-        .history { margin-top: 25px; text-align: left; }
-        .history-item { background: #0f172a; padding: 12px; border-radius: 15px; margin-bottom: 12px; border: 1px solid #334155; }
-        .real-time { font-size: 0.85rem; color: #fbbf24; font-weight: bold; }
-        .item-stats { font-size: 0.75rem; color: #cbd5e1; background: #1e293b; padding: 6px; border-radius: 6px; display: flex; justify-content: space-between; margin: 8px 0; }
-        .saved-text { font-size: 0.9rem; color: #e2e8f0; padding: 8px; background: #1e293b; border-radius: 8px; outline: none; border: 1px dashed #475569; min-height: 20px; }
-        audio { width: 100%; height: 35px; margin-top: 10px; }
+
+        /* Timer ja tekst */
+        #timer { font-size: 3rem; font-weight: bold; margin: 15px 0; color: #fbbf24; }
+        #live-transcript { min-height: 80px; max-height: 120px; background: #000; color: #fbbf24; padding: 12px; border-radius: 12px; overflow-y: auto; border: 1px solid #334155; margin-bottom: 20px; text-align: left; font-size: 1rem; }
+
+        /* NUPUD - TEHTUD SUUREMAKS JA NÄHTAVAMAKS */
+        .btn { display: block; width: 100%; padding: 25px; font-size: 1.4rem; border-radius: 20px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 15px; color: white; }
+        #startBtn { background: #22c55e; box-shadow: 0 6px 0 #166534; }
+        #fixBtn { background: #eab308; color: black; box-shadow: 0 6px 0 #a16207; }
+        #stopBtn { background: #ef4444; font-size: 1rem; padding: 15px; box-shadow: 0 4px 0 #991b1b; }
+
+        /* Logi */
+        .history { margin-top: 30px; text-align: left; }
+        .history-item { background: #0f172a; padding: 15px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #334155; }
+        audio { width: 100%; margin-top: 10px; }
     </style>
 </head>
 <body>
+
 <div class="container">
     <div class="stats">
         <div class="stat-card"><div id="s-val" class="stat-val">0s</div><small>KÕNE</small></div>
         <div class="stat-card"><div id="v-val" class="stat-val" style="color:#94a3b8">0s</div><small>VAIKUS</small></div>
     </div>
-    <div id="live-transcript">Aktiveeri salvestus...</div>
+
+    <div id="live-transcript">Vajuta nuppu, et alustada...</div>
     <div id="timer">00:00</div>
-    <button id="startBtn" class="start-btn">🎤 ALUSTA SALVESTAMIST</button>
+
+    <button id="startBtn" class="btn">🎤 ALUSTA SALVESTAMIST</button>
+    
     <div id="activeControls" style="display:none;">
-        <button id="fixBtn" class="fix-btn">📍 FIKSEERI (LÕIKA)</button>
-        <button id="stopBtn" class="stop-btn">⏹️ LÕPETA SESSIOON</button>
+        <button id="fixBtn" class="btn">📍 FIKSEERI (LÕIKA)</button>
+        <button id="stopBtn" class="btn">⏹️ LÕPETA SESSIOON</button>
     </div>
+
     <div class="history">
-        <h4 style="border-bottom: 1px solid #334155; padding-bottom: 5px;">Salvestatud logi</h4>
+        <h3 style="border-bottom: 1px solid #334155; padding-bottom: 10px;">Salvestatud logi</h3>
         <div id="history-list"></div>
     </div>
 </div>
+
 <script>
     let isLive = false, speechMs = 0, silenceMs = 0, currentChunks = [];
     let mediaRecorder, audioContext, analyser, processor, stream, recognition, db, clipStartTime;
+
+    // Andmebaas
     const req = indexedDB.open("PeegelFinalDB", 1);
     req.onupgradeneeded = e => e.target.result.createObjectStore("archive", { keyPath: "id" });
     req.onsuccess = e => { db = e.target.result; renderHistory(); };
+
     async function startEngine() {
         try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -57,34 +70,57 @@
             const source = audioContext.createMediaStreamSource(stream);
             processor = audioContext.createScriptProcessor(2048, 1, 1);
             source.connect(analyser); analyser.connect(processor); processor.connect(audioContext.destination);
+
             processor.onaudioprocess = () => {
                 if (!isLive) return;
-                const array = new Uint8Array(analyser.frequencyBinCount); analyser.getByteFrequencyData(array);
+                const array = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(array);
                 let avg = array.reduce((a, b) => a + b) / array.length;
-                if (avg > 12) { speechMs += 50; if (mediaRecorder?.state === "paused") mediaRecorder.resume(); } 
-                else { silenceMs += 50; if (mediaRecorder?.state === "recording") mediaRecorder.pause(); }
+                if (avg > 10) { 
+                    speechMs += 50; 
+                    if (mediaRecorder?.state === "paused") mediaRecorder.resume();
+                } else { 
+                    silenceMs += 50; 
+                    if (mediaRecorder?.state === "recording") mediaRecorder.pause();
+                }
                 document.getElementById('s-val').innerText = Math.round(speechMs/1000) + "s";
                 document.getElementById('v-val').innerText = Math.round(silenceMs/1000) + "s";
             };
+
             const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRec) {
-                recognition = new SpeechRec(); recognition.continuous = true; recognition.interimResults = true; recognition.lang = 'et-EE';
+                recognition = new SpeechRec();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'et-EE';
                 recognition.onresult = (e) => {
-                    let final = ""; for (let i = e.resultIndex; i < e.results.length; ++i) if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
-                    if (final) { const div = document.getElementById('live-transcript'); if (div.innerText.includes("Aktiveeri")) div.innerText = ""; div.innerText += final; }
+                    let final = "";
+                    for (let i = e.resultIndex; i < e.results.length; ++i) {
+                        if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
+                    }
+                    if (final) {
+                        const div = document.getElementById('live-transcript');
+                        if (div.innerText.includes("Vajuta nuppu")) div.innerText = "";
+                        div.innerText += final;
+                    }
                 };
                 recognition.onend = () => { if (isLive) recognition.start(); };
                 recognition.start();
             }
             createNewRecorder();
-        } catch (e) { alert("Viga: " + e.message); }
+        } catch (e) { alert("Mikrofoni viga: " + e.message); }
     }
+
     function createNewRecorder() {
-        if (!isLive) return; currentChunks = []; clipStartTime = new Date().toLocaleTimeString();
-        mediaRecorder = new MediaRecorder(stream); speechMs = 0; silenceMs = 0;
+        if (!isLive) return;
+        currentChunks = [];
+        clipStartTime = new Date().toLocaleTimeString();
+        mediaRecorder = new MediaRecorder(stream);
+        speechMs = 0; silenceMs = 0;
         mediaRecorder.ondataavailable = e => { if(e.data.size > 0) currentChunks.push(e.data); };
         mediaRecorder.onstop = () => {
-            const endT = new Date().toLocaleTimeString(); const txt = document.getElementById('live-transcript').innerText;
+            const endT = new Date().toLocaleTimeString();
+            const txt = document.getElementById('live-transcript').innerText;
             const blob = new Blob(currentChunks, { type: 'audio/webm' });
             const tx = db.transaction("archive", "readwrite");
             tx.objectStore("archive").add({ id: Date.now(), start: clipStartTime, end: endT, blob, speechTime: document.getElementById('s-val').innerText, silenceTime: document.getElementById('v-val').innerText, text: txt });
@@ -93,23 +129,46 @@
         };
         mediaRecorder.start();
     }
-    document.getElementById('startBtn').onclick = () => { isLive = true; document.getElementById('startBtn').style.display = 'none'; document.getElementById('activeControls').style.display = 'block'; startEngine(); setInterval(() => { if (!isLive) return; const elapsed = Math.floor(speechMs / 1000); document.getElementById('timer').innerText = `${Math.floor(elapsed/60).toString().padStart(2,'0')}:${(elapsed%60).toString().padStart(2,'0')}`; }, 1000); };
+
+    document.getElementById('startBtn').onclick = () => {
+        isLive = true;
+        document.getElementById('startBtn').style.display = 'none';
+        document.getElementById('activeControls').style.display = 'block';
+        startEngine();
+        setInterval(() => {
+            if (!isLive) return;
+            const elapsed = Math.floor(speechMs / 1000);
+            document.getElementById('timer').innerText = `${Math.floor(elapsed/60).toString().padStart(2,'0')}:${(elapsed%60).toString().padStart(2,'0')}`;
+        }, 1000);
+    };
+
     document.getElementById('fixBtn').onclick = () => { if (isLive) mediaRecorder.stop(); };
-    document.getElementById('stopBtn').onclick = () => { isLive = false; mediaRecorder?.stop(); recognition?.stop(); stream?.getTracks().forEach(t => t.stop()); document.getElementById('startBtn').style.display = 'block'; document.getElementById('activeControls').style.display = 'none'; };
+    document.getElementById('stopBtn').onclick = () => {
+        isLive = false;
+        mediaRecorder?.stop();
+        recognition?.stop();
+        stream?.getTracks().forEach(t => t.stop());
+        document.getElementById('startBtn').style.display = 'block';
+        document.getElementById('activeControls').style.display = 'none';
+    };
+
     function renderHistory() {
         const tx = db.transaction("archive", "readonly");
         tx.objectStore("archive").getAll().onsuccess = e => {
             const list = e.target.result.sort((a,b) => b.id - a.id);
             document.getElementById('history-list').innerHTML = list.map(s => `
                 <div class="history-item">
-                    <div style="display:flex; justify-content:space-between; font-weight:bold; color:#fbbf24; font-size:0.8rem;"><span>⏰ ${s.start} — ${s.end}</span><button onclick="deleteS(${s.id})" style="background:none; border:none; color:#ef4444; cursor:pointer;">🗑️</button></div>
-                    <div style="font-size:0.7rem; margin:5px 0;">🎤 Kõne: ${s.speechTime} | ☁️ Paus: ${s.silenceTime}</div>
-                    <div style="font-size:0.85rem; background:#1e293b; padding:8px; border-radius:8px; margin:5px 0;">${s.text || "..." }</div>
+                    <div style="display:flex; justify-content:space-between; font-weight:bold; color:#fbbf24; font-size:0.9rem;">
+                        <span>⏰ ${s.start} — ${s.end}</span>
+                        <button onclick="deleteS(${s.id})" style="background:none; border:none; color:#ef4444; font-size:1.2rem;">🗑️</button>
+                    </div>
+                    <div style="font-size:0.8rem; margin:10px 0;">🎤 Kõne: ${s.speechTime} | ☁️ Paus: ${s.silenceTime}</div>
+                    <div style="font-size:1rem; background:#1e293b; padding:10px; border-radius:10px; margin:10px 0;">${s.text || "..." }</div>
                     <audio controls src="${URL.createObjectURL(s.blob)}"></audio>
                 </div>`).join('');
         };
     }
-    window.deleteS = (id) => { if(confirm("Kustuta?")) { const tx = db.transaction("archive", "readwrite"); tx.objectStore("archive").delete(id); tx.oncomplete = renderHistory; } };
+    window.deleteS = (id) => { if(confirm("Kustuta see lõik?")) { const tx = db.transaction("archive", "readwrite"); tx.objectStore("archive").delete(id); tx.oncomplete = renderHistory; } };
 </script>
 </body>
 </html>
