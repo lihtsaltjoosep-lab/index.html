@@ -3,82 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v7.7 - Tekstikeskne</title>
+    <title>Peegel v7.8</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 15px; margin: 0; }
         .container { background: #1e293b; padding: 20px; border-radius: 25px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
-        .stats { display: flex; gap: 10px; margin-bottom: 15px; }
-        .stat-card { flex: 1; background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
-        .stat-val { font-size: 1.2rem; font-weight: bold; color: #22c55e; }
         
-        /* Tekstikast */
-        #live-transcript { min-height: 120px; max-height: 200px; background: #000; color: #fbbf24; padding: 15px; border-radius: 15px; overflow-y: auto; border: 2px solid #3b82f6; margin-bottom: 20px; text-align: left; font-size: 1.1rem; line-height: 1.4; }
-        
+        #live-transcript { min-height: 100px; background: #000; color: #fbbf24; padding: 15px; border-radius: 15px; border: 2px solid #3b82f6; margin-bottom: 20px; text-align: left; font-size: 1.1rem; }
         #timer { font-size: 3rem; font-weight: bold; margin: 10px 0; color: #fbbf24; }
+        
         .btn { display: block; width: 100%; padding: 22px; font-size: 1.3rem; border-radius: 20px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 15px; color: white; }
         #startBtn { background: #22c55e; box-shadow: 0 6px 0 #166534; }
         #fixBtn { background: #eab308; color: black; box-shadow: 0 6px 0 #a16207; }
-        #stopBtn { background: #ef4444; font-size: 1rem; padding: 15px; box-shadow: 0 4px 0 #991b1b; }
-        
-        .history-item { background: #0f172a; padding: 15px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #334155; text-align: left; }
+        #stopBtn { background: #ef4444; box-shadow: 0 4px 0 #991b1b; }
+
+        .history-item { background: #0f172a; padding: 15px; border-radius: 15px; margin-top: 20px; border: 1px solid #334155; text-align: left; position: relative; }
+        .del-btn { background: #ef4444; color: white; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; float: right; font-weight: bold; }
+        .dl-link { color: #3b82f6; text-decoration: none; font-size: 0.9rem; font-weight: bold; display: block; margin-top: 10px; }
         audio { width: 100%; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="stats">
-        <div class="stat-card"><div id="s-val" class="stat-val">0s</div><small>KÕNE</small></div>
-        <div class="stat-card"><div id="v-val" class="stat-val" style="color:#94a3b8">0s</div><small>VAIKUS</small></div>
-    </div>
-
-    <div id="live-transcript">Süsteem ootab käivitust...</div>
-    
+    <div id="live-transcript">Vajuta ALUSTA ja räägi...</div>
     <div id="timer">00:00</div>
 
     <button id="startBtn" class="btn">🎤 ALUSTA SALVESTAMIST</button>
     
     <div id="activeControls" style="display:none;">
-        <button id="fixBtn" class="btn">📍 SALVESTA LÕIK (FIKSEERI)</button>
+        <button id="fixBtn" class="btn">📍 SALVESTA LÕIK</button>
         <button id="stopBtn" class="btn">⏹️ LÕPETA SESSIOON</button>
     </div>
 
-    <div id="history-list" style="margin-top:30px;"></div>
+    <div id="history-list"></div>
 </div>
 
 <script>
-    let isLive = false, speechMs = 0, silenceMs = 0, currentChunks = [];
-    let mediaRecorder, stream, recognition, db, clipStartTime;
+    let isLive = false, speechMs = 0, currentChunks = [];
+    let mediaRecorder, stream, recognition, db;
 
-    const req = indexedDB.open("PeegelFinalDB", 1);
-    req.onupgradeneeded = e => e.target.result.createObjectStore("archive", { keyPath: "id" });
-    req.onsuccess = e => { db = e.target.result; renderHistory(); };
-
-    async function initSpeech() {
-        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRec) {
-            document.getElementById('live-transcript').innerText = "VIGA: Sinu brauser ei toeta teksti kirjutamist. Kasuta Chrome'i!";
-            return;
+    // Andmebaasi avamine
+    const request = indexedDB.open("PeegelDatabase", 2);
+    request.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains("archive")) {
+            db.createObjectStore("archive", { keyPath: "id" });
         }
+    };
+    request.onsuccess = e => { db = e.target.result; renderHistory(); };
 
+    function startSpeech() {
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRec) return;
         recognition = new SpeechRec();
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = 'et-EE';
 
-        recognition.onstart = () => { document.getElementById('live-transcript').innerText = "Kuulan..."; };
-        recognition.onerror = (e) => { document.getElementById('live-transcript').innerText = "Viga tekstiga: " + e.error; };
-        
         recognition.onresult = (e) => {
-            let interim = "";
-            let final = "";
-            for (let i = e.resultIndex; i < e.results.length; ++i) {
-                if (e.results[i].isFinal) final += e.results[i][0].transcript;
-                else interim += e.results[i][0].transcript;
+            let text = "";
+            for (let i = 0; i < e.results.length; i++) {
+                text += e.results[i][0].transcript;
             }
-            document.getElementById('live-transcript').innerText = final || interim;
+            document.getElementById('live-transcript').innerText = text;
         };
-
         recognition.onend = () => { if (isLive) recognition.start(); };
         recognition.start();
     }
@@ -86,46 +74,30 @@
     async function startEngine() {
         try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
-            // Heli analüüs vaikuse jaoks
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const source = audioCtx.createMediaStreamSource(stream);
-            const analyser = audioCtx.createAnalyser();
-            const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-            source.connect(analyser); analyser.connect(processor); processor.connect(audioCtx.destination);
-
-            processor.onaudioprocess = () => {
-                if (!isLive) return;
-                const array = new Uint8Array(analyser.frequencyBinCount);
-                analyser.getByteFrequencyData(array);
-                let avg = array.reduce((a, b) => a + b) / array.length;
-                if (avg > 8) speechMs += 100; else silenceMs += 100;
-                document.getElementById('s-val').innerText = Math.round(speechMs/1000) + "s";
-                document.getElementById('v-val').innerText = Math.round(silenceMs/1000) + "s";
-            };
-
-            initSpeech();
+            startSpeech();
             createNewRecorder();
-        } catch (e) { alert("Mikrofoni viga: " + e.message); }
+        } catch (e) { alert("Viga: " + e.message); }
     }
 
     function createNewRecorder() {
         if (!isLive) return;
         currentChunks = [];
-        clipStartTime = new Date().toLocaleTimeString();
         mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = e => { if(e.data.size > 0) currentChunks.push(e.data); };
-        mediaRecorder.onstop = () => {
+        mediaRecorder.ondataavailable = e => currentChunks.push(e.data);
+        mediaRecorder.onstop = async () => {
             const blob = new Blob(currentChunks, { type: 'audio/webm' });
+            const text = document.getElementById('live-transcript').innerText;
             const tx = db.transaction("archive", "readwrite");
-            tx.objectStore("archive").add({ 
-                id: Date.now(), start: clipStartTime, end: new Date().toLocaleTimeString(), 
-                blob, text: document.getElementById('live-transcript').innerText 
+            tx.objectStore("archive").add({
+                id: Date.now(),
+                time: new Date().toLocaleTimeString(),
+                blob: blob,
+                text: text
             });
             tx.oncomplete = () => {
                 renderHistory();
                 if (isLive) {
-                    document.getElementById('live-transcript').innerText = "Jätkan...";
+                    document.getElementById('live-transcript').innerText = "";
                     createNewRecorder();
                 }
             };
@@ -139,27 +111,42 @@
         document.getElementById('activeControls').style.display = 'block';
         startEngine();
         setInterval(() => {
-            if (!isLive) return;
-            const elapsed = Math.floor(speechMs / 1000);
-            document.getElementById('timer').innerText = `${Math.floor(elapsed/60).toString().padStart(2,'0')}:${(elapsed%60).toString().padStart(2,'0')}`;
+            if (isLive) {
+                speechMs += 1000;
+                let s = Math.floor(speechMs/1000);
+                document.getElementById('timer').innerText = `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+            }
         }, 1000);
     };
 
-    document.getElementById('fixBtn').onclick = () => { if (isLive) mediaRecorder.stop(); };
+    document.getElementById('fixBtn').onclick = () => { if (mediaRecorder) mediaRecorder.stop(); };
     document.getElementById('stopBtn').onclick = () => { location.reload(); };
 
     function renderHistory() {
         const tx = db.transaction("archive", "readonly");
         tx.objectStore("archive").getAll().onsuccess = e => {
             const list = e.target.result.sort((a,b) => b.id - a.id);
-            document.getElementById('history-list').innerHTML = list.map(s => `
+            document.getElementById('history-list').innerHTML = list.map(s => {
+                const url = URL.createObjectURL(s.blob);
+                return `
                 <div class="history-item">
-                    <div style="font-weight:bold; color:#fbbf24; margin-bottom:5px;">⏰ ${s.start} — ${s.end}</div>
-                    <div style="font-size:0.95rem; background:#1e293b; padding:10px; border-radius:10px;">${s.text || "Teksti ei tuvastatud"}</div>
-                    <audio controls src="${URL.createObjectURL(s.blob)}"></audio>
-                </div>`).join('');
+                    <button class="del-btn" onclick="deleteItem(${s.id})">KUSTUTA</button>
+                    <div style="font-weight:bold; color:#fbbf24;">⏰ ${s.time}</div>
+                    <div style="margin:10px 0; font-size:1rem;">${s.text || "(Tekst puudub)"}</div>
+                    <audio controls src="${url}"></audio>
+                    <a href="${url}" download="salvestus.webm" class="dl-link">📥 Laadi alla arvutisse</a>
+                </div>`;
+            }).join('');
         };
     }
+
+    window.deleteItem = (id) => {
+        if (confirm("Kas kustutada see salvestus?")) {
+            const tx = db.transaction("archive", "readwrite");
+            tx.objectStore("archive").delete(id);
+            tx.oncomplete = renderHistory;
+        }
+    };
 </script>
 </body>
 </html>
