@@ -3,154 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Peegel v8.0</title>
+    <title>Peegel v8.1</title>
     <style>
         body { background: #020617; color: white; font-family: sans-serif; text-align: center; padding: 10px; margin: 0; }
         .container { background: #1e293b; padding: 15px; border-radius: 20px; border: 1px solid #334155; width: 100%; max-width: 500px; display: inline-block; box-sizing: border-box; }
         .stats { display: flex; gap: 8px; margin-bottom: 10px; }
-        .stat-card { flex: 1; background: #0f172a; padding: 8px; border-radius: 10px; border: 1px solid #334155; }
-        .stat-val { font-size: 1.1rem; font-weight: bold; color: #22c55e; }
-        #live-transcript { min-height: 120px; background: #000; color: #fbbf24; padding: 12px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 15px; text-align: left; font-size: 1.1rem; overflow-y: auto; }
-        #timer { font-size: 2.5rem; font-weight: bold; margin: 10px 0; color: #fbbf24; }
-        .btn { display: block; width: 100%; padding: 20px; font-size: 1.2rem; border-radius: 15px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 10px; color: white; }
-        #startBtn { background: #22c55e; box-shadow: 0 4px 0 #166534; }
-        #fixBtn { background: #eab308; color: black; box-shadow: 0 4px 0 #a16207; }
-        #stopBtn { background: #ef4444; font-size: 0.9rem; padding: 10px; }
+        .stat-card { flex: 1; background: #0f172a; padding: 10px; border-radius: 12px; border: 1px solid #334155; }
+        #live-transcript { min-height: 100px; background: #000; color: #fbbf24; padding: 12px; border-radius: 12px; border: 2px solid #3b82f6; margin-bottom: 15px; text-align: left; }
+        .btn { display: block; width: 100%; padding: 20px; font-size: 1.2rem; border-radius: 15px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 10px; }
+        #startBtn { background: #22c55e; color: white; }
+        #fixBtn { background: #eab308; color: black; }
         .history-item { background: #0f172a; padding: 15px; border-radius: 15px; margin-top: 15px; border: 1px solid #475569; text-align: left; }
-        .item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .del-btn { background: #ef4444; color: white; border: none; padding: 8px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; }
-        .dl-btn { background: #3b82f6; color: white; border: none; padding: 8px 15px; border-radius: 8px; text-decoration: none; font-size: 0.8rem; font-weight: bold; }
+        .del-btn { background: #ef4444; color: white; border: none; padding: 8px; border-radius: 5px; float: right; cursor: pointer; }
         audio { width: 100%; margin-top: 10px; }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="stats">
-        <div class="stat-card"><div id="s-val" class="stat-val">0s</div><small>KÕNE</small></div>
-        <div class="stat-card"><div id="v-val" class="stat-val" style="color:#94a3b8">0s</div><small>VAIKUS</small></div>
+        <div class="stat-card">🎤 Kõne: <span id="s-val" style="color:#22c55e">0s</span></div>
+        <div class="stat-card">☁️ Vaikus: <span id="v-val" style="color:#94a3b8">0s</span></div>
     </div>
-    <div id="live-transcript">Ootan häält...</div>
-    <div id="timer">00:00</div>
-    <button id="startBtn" class="btn">🎤 ALUSTA SESSIOONI</button>
+    <div id="live-transcript">Vajuta ALUSTA...</div>
+    <button id="startBtn" class="btn">🎤 ALUSTA</button>
     <div id="activeControls" style="display:none;">
-        <button id="fixBtn" class="btn">📍 FIKSEERI (SALVESTA LÕIK)</button>
-        <button id="stopBtn" class="btn">LÕPETA KÕIK</button>
+        <button id="fixBtn" class="btn">📍 SALVESTA LÕIK</button>
+        <button onclick="location.reload()" style="background:#ef4444; color:white; width:100%; padding:10px; border-radius:10px; border:none;">LÕPETA</button>
     </div>
     <div id="history-list"></div>
+    <button onclick="clearDB()" style="margin-top:50px; background:none; color:#475569; border:none; font-size:0.7rem;">PUHASTA LOGI AJALUGU</button>
 </div>
 
 <script>
-    let isLive = false, speechMs = 0, silenceMs = 0, currentChunks = [];
-    let mediaRecorder, stream, recognition, db, audioCtx, analyser, processor;
+    let isLive = false, speechMs = 0, silenceMs = 0, db, stream, mediaRecorder, recognition;
 
-    const request = indexedDB.open("PeegelDatabase", 3);
-    request.onupgradeneeded = e => e.target.result.createObjectStore("archive", { keyPath: "id" });
+    // ANDMEBAAS (Uus nimi, et vältida vanu vigu)
+    const request = indexedDB.open("PeegelV81", 1);
+    request.onupgradeneeded = e => e.target.result.createObjectStore("log", { keyPath: "id" });
     request.onsuccess = e => { db = e.target.result; renderHistory(); };
 
-    function startSpeech() {
-        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRec) return;
-        recognition = new SpeechRec();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'et-EE';
-        recognition.onresult = (e) => {
-            let text = "";
-            for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
-            document.getElementById('live-transcript').innerText = text;
-        };
-        recognition.onend = () => { if (isLive) recognition.start(); };
-        recognition.start();
-    }
-
-    async function startEngine() {
+    async function start() {
         try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioCtx = new AudioContext();
-            analyser = audioCtx.createAnalyser();
-            const source = audioCtx.createMediaStreamSource(stream);
-            processor = audioCtx.createScriptProcessor(2048, 1, 1);
-            source.connect(analyser); analyser.connect(processor); processor.connect(audioCtx.destination);
-
+            
+            // Heli analüüs
+            const ctx = new AudioContext();
+            const analyser = ctx.createAnalyser();
+            const processor = ctx.createScriptProcessor(2048, 1, 1);
+            ctx.createMediaStreamSource(stream).connect(analyser);
+            analyser.connect(processor);
+            processor.connect(ctx.destination);
             processor.onaudioprocess = () => {
                 if (!isLive) return;
-                const array = new Uint8Array(analyser.frequencyBinCount);
-                analyser.getByteFrequencyData(array);
-                let avg = array.reduce((a, b) => a + b) / array.length;
-                if (avg > 10) speechMs += 50; else silenceMs += 50;
+                const data = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(data);
+                if (data.reduce((a, b) => a + b) / data.length > 10) speechMs += 50; else silenceMs += 50;
                 document.getElementById('s-val').innerText = Math.round(speechMs/1000) + "s";
                 document.getElementById('v-val').innerText = Math.round(silenceMs/1000) + "s";
             };
-            startSpeech();
-            createNewRecorder();
-        } catch (e) { alert("Viga: " + e.message); }
+
+            // Tekst
+            const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (Rec) {
+                recognition = new Rec(); recognition.continuous = true; recognition.interimResults = true; recognition.lang = 'et-EE';
+                recognition.onresult = e => {
+                    let t = ""; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+                    document.getElementById('live-transcript').innerText = t;
+                };
+                recognition.start();
+            }
+            record();
+        } catch (e) { alert(e); }
     }
 
-    function createNewRecorder() {
+    function record() {
         if (!isLive) return;
-        currentChunks = [];
-        let startTime = new Date().toLocaleTimeString();
+        let chunks = [];
         mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = e => currentChunks.push(e.data);
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
         mediaRecorder.onstop = () => {
-            const blob = new Blob(currentChunks, { type: 'audio/webm' });
-            const tx = db.transaction("archive", "readwrite");
-            tx.objectStore("archive").add({
+            const tx = db.transaction("log", "readwrite");
+            tx.objectStore("log").add({
                 id: Date.now(),
-                time: startTime + " - " + new Date().toLocaleTimeString(),
-                blob: blob,
                 text: document.getElementById('live-transcript').innerText,
-                stats: `🎤 Kõne: ${document.getElementById('s-val').innerText} | ☁️ Vaikus: ${document.getElementById('v-val').innerText}`
+                blob: new Blob(chunks, { type: 'audio/webm' }),
+                stats: `🎤 ${document.getElementById('s-val').innerText} | ☁️ ${document.getElementById('v-val').innerText}`
             });
             tx.oncomplete = () => {
                 renderHistory();
-                if (isLive) {
-                    speechMs = 0; silenceMs = 0;
-                    document.getElementById('live-transcript').innerText = "...";
-                    createNewRecorder();
-                }
+                if (isLive) { speechMs = 0; silenceMs = 0; document.getElementById('live-transcript').innerText = "..."; record(); }
             };
         };
         mediaRecorder.start();
     }
 
     document.getElementById('startBtn').onclick = () => {
-        isLive = true;
-        document.getElementById('startBtn').style.display = 'none';
+        isLive = true; document.getElementById('startBtn').style.display = 'none';
         document.getElementById('activeControls').style.display = 'block';
-        startEngine();
-        setInterval(() => {
-            if (isLive) {
-                let s = Math.floor((speechMs + silenceMs)/1000);
-                document.getElementById('timer').innerText = `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
-            }
-        }, 1000);
+        start();
     };
-
-    document.getElementById('fixBtn').onclick = () => { if (mediaRecorder) mediaRecorder.stop(); };
-    document.getElementById('stopBtn').onclick = () => { location.reload(); };
+    document.getElementById('fixBtn').onclick = () => mediaRecorder.stop();
 
     function renderHistory() {
-        const tx = db.transaction("archive", "readonly");
-        tx.objectStore("archive").getAll().onsuccess = e => {
-            const list = e.target.result.sort((a,b) => b.id - a.id);
-            document.getElementById('history-list').innerHTML = list.map(s => {
-                const url = URL.createObjectURL(s.blob);
-                return `
+        const tx = db.transaction("log", "readonly");
+        tx.objectStore("log").getAll().onsuccess = e => {
+            const items = e.target.result.sort((a,b) => b.id - a.id);
+            document.getElementById('history-list').innerHTML = items.map(s => `
                 <div class="history-item">
-                    <div class="item-header">
-                        <a href="${url}" download="salvestus.webm" class="dl-btn">📥 SALVESTA TELEFONI</a>
-                        <button class="del-btn" onclick="deleteItem(${s.id})">KUSTUTA</button>
-                    </div>
-                    <div style="font-weight:bold; color:#fbbf24; margin-bottom:5px;">⏰ ${s.time}</div>
-                    <div style="font-size:0.8rem; color:#94a3b8; margin-bottom:10px;">${s.stats}</div>
-                    <div style="font-size:1rem; border-left: 4px solid #3b82f6; padding-left:10px; margin-bottom:10px;">${s.text || "(Teksti ei tekkinud)"}</div>
-                    <audio controls src="${url}"></audio>
-                </div>`;
-            }).join('');
+                    <button class="del-btn" onclick="del(${s.id})">🗑️</button>
+                    <div style="font-size:0.8rem; color:#fbbf24;">${new Date(s.id).toLocaleTimeString()}</div>
+                    <div style="font-size:0.7rem; color:#94a3b8; margin:5px 0;">${s.stats}</div>
+                    <div style="margin:10px 0;">${s.text || "Paus..."}</div>
+                    <audio controls src="${URL.createObjectURL(s.blob)}"></audio>
+                </div>`).join('');
         };
     }
-    window.deleteItem = (id) => { if (confirm("Kustutada?")) { const tx = db.transaction("archive", "readwrite"); tx.objectStore("archive").delete(id); tx.oncomplete = renderHistory; } };
+    window.del = id => { const tx = db.transaction("log", "readwrite"); tx.objectStore("log").delete(id); tx.oncomplete = renderHistory; };
+    window.clearDB = () => { if(confirm("Kustuta kõik?")) { const tx = db.transaction("log", "readwrite"); tx.objectStore("log").clear(); tx.oncomplete = renderHistory; } };
 </script>
 </body>
 </html>
